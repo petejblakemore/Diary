@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Merged into Diary.app's Info.plist by Tauri at build time.
+       macOS shows these when asking permission for protected folders. -->
+  <key>NSDocumentsFolderUsageDescription</key>
+  <string>Diary stores your entries as Markdown files in the folder you choose.</string>
+  <key>NSDesktopFolderUsageDescription</key>
+  <string>Diary stores your entries in, and attaches files from, the folder you choose.</string>
+  <key>NSDownloadsFolderUsageDescription</key>
+  <string>Diary can attach files from your Downloads folder to an entry.</string>
+</dict>
+</plist>

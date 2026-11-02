@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <title>Diary</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main id="welcome" hidden>
+    <div class="welcome-card">
+      <h1>Diary</h1>
+      <p>Choose the folder where your entries will live. Everything stays on this Mac as plain Markdown files, with a full history kept by Git.</p>
+      <p class="hint">A new, empty folder such as <em>~/Diary</em> works best.</p>
+      <button id="choose" class="primary">Choose diary folder…</button>
+      <p id="welcome-error" class="error"></p>
+    </div>
+  </main>
+
+  <div id="app" hidden>
+    <aside id="sidebar">
+      <button id="today" class="primary" title="⌘T · hold ⌥ to choose a template">Today</button>
+
+      <section class="calendar" aria-label="Calendar">
+        <header>
+          <button id="prev" aria-label="Previous month">‹</button>
+          <button id="month-title" title="Back to this month"></button>
+          <button id="next" aria-label="Next month">›</button>
+        </header>
+        <div class="weekdays"><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span></div>
+        <div id="days" class="days"></div>
+      </section>
+
+      <section class="templates">
+        <h2>Templates</h2>
+        <ul id="templates"></ul>
+        <button id="add-template" class="link">+ New template</button>
+        <input id="new-template" type="text" placeholder="Template name, then Return" maxlength="64" hidden>
+      </section>
+
+      <footer>
+        <button id="import-button" class="link">Import old entries…</button>
+        <button id="journal-path" class="link" title="Change diary folder (⌘,)"></button>
+      </footer>
+    </aside>
+
+    <section id="writing">
+      <div id="toolbar">
+        <div class="tools" role="toolbar" aria-label="Formatting">
+          <button data-cmd="h1" title="Heading 1 (⌘1)">H1</button>
+          <button data-cmd="h2" title="Heading 2 (⌘2)">H2</button>
+          <button data-cmd="h3" title="Heading 3 (⌘3)">H3</button>
+          <span class="sep"></span>
+          <button data-cmd="bold" title="Bold (⌘B)"><b>B</b></button>
+          <button data-cmd="strike" title="Strikethrough (⇧⌘X)"><s>S</s></button>
+        </div>
+        <span id="doc-title"></span>
+        <div class="right">
+          <span id="save-state"></span>
+          <button id="raw" class="link" title="Raw Markdown (⇧⌘R)">Raw</button>
+          <button id="zen" class="link" title="Zen mode (⌘.)">Zen</button>
+        </div>
+      </div>
+      <div id="editor" contenteditable="true" spellcheck="true" role="textbox" aria-multiline="true" aria-label="Diary entry"></div>
+      <textarea id="raw-editor" spellcheck="true" aria-label="Raw Markdown" hidden></textarea>
+    </section>
+  </div>
+
+  <button id="zen-exit" class="link" title="Exit Zen (Esc or ⌘.)">Exit Zen</button>
+
+  <div id="spell-menu" role="menu" hidden></div>
+
+  <div id="picker" class="overlay" hidden>
+    <div class="picker-card">
+      <h2>Start from template</h2>
+      <div id="picker-list"></div>
+    </div>
+  </div>
+
+  <div id="import-dialog" class="overlay" hidden>
+    <div id="import-body" class="picker-card import-card"></div>
+  </div>
+
+  <script src="editor.js"></script>
+  <script src="main.js"></script>
+</body>
+</html>

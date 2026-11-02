@@ -1,0 +1,31 @@
+[package]
+name = "diary"
+version = "1.0.0"
+description = "A sovereign, local-only diary"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-window-state = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = "0.4"
+regex = "1"
+walkdir = "2"
+# Bundled libgit2, no network features: the app never needs system Git.
+git2 = { version = "0.20", default-features = false, features = ["vendored-libgit2"] }
+
+# Bridge to the Mac's own spell checker.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = "0.3"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
