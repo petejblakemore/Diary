@@ -48,6 +48,8 @@ If a change would bend this rule, ask first.
     src/main.rs                    files, Git, menus, quitting, attachments
     src/import.rs                  importing old Markdown folders
     src/spelling.rs                macOS NSSpellChecker bridge
+    src/tags.rs                    scans the diary for #tags
+    src/reminder.rs                evening reminder (LaunchAgent + notification)
     tauri.conf.json, Info.plist, capabilities/default.json, Cargo.toml
   app-icon.svg                     run `cargo tauri icon app-icon.svg` once
 ```
@@ -94,6 +96,19 @@ App settings are in `~/Library/Application Support/com.pete.diary/`.
 
 ## Known soft spots
 
+- **The reminder** installs `~/Library/LaunchAgents/com.pete.diary.reminder.plist`,
+  which runs `Diary.app/Contents/MacOS/diary --remind` at the chosen time. That
+  run opens no window: it reads the settings file, checks for today's entry, and
+  only notifies within three hours of the set time (so waking the Mac next
+  morning doesn't trigger it). Notifications use `mac-notification-sys`, which
+  relies on Apple's older notification API. If a future macOS stops showing
+  them, switch `reminder::notify` to UNUserNotificationCenter.
+- **Tags** are plain text (`#word`, a letter first). Nothing is indexed on disk:
+  `all_tags` scans the diary at launch, and the page updates the list from each
+  saved entry. Fine for decades of entries; revisit only if launch gets slow.
+- **Settings** live in `config.json` with `#[serde(default)]`, so new fields
+  can be added without breaking older files. `set_journal` and friends must
+  load, change and save the whole config, never write a fresh one.
 - **Quit handling** (`request_quit`/`finish` in main.rs): saves, commits, then
   exits, with a 3-second fallback. If ⌘Q ever skips the final commit, the next
   launch commits it as "External changes", so nothing is lost.
@@ -102,7 +117,8 @@ App settings are in `~/Library/Application Support/com.pete.diary/`.
   `tccutil reset SystemPolicyDocumentsFolder com.pete.diary` clears a stuck one.
 - **Imported front-matter is kept verbatim.** Pete was offered automatic
   stripping and hasn't answered yet.
-- **Lists don't auto-continue on Return.** That hasn't been asked for.
+- **Lists don't auto-renumber** when items are moved or deleted; Return
+  continues numbering from the line above.
 - **Library versions:** Tauri 2, git2 0.20 (vendored, no network features),
   objc2 0.6 / objc2-foundation 0.3. `spelling.rs` is the file most sensitive to
   version changes.

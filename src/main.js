@@ -203,8 +203,8 @@ function markDirty() {
 
 // ---------- spelling ----------
 
-// Link addresses, inline code and URLs aren't prose, so aren't checked.
-const NOT_PROSE = /\]\([^)]*\)|`[^`]*`|https?:\/\/\S+/g;
+// Link addresses, inline code, URLs and #tags aren't prose, so aren't checked.
+const NOT_PROSE = /\]\([^)]*\)|`[^`]*`|https?:\/\/\S+|#\p{L}[\p{L}\p{N}_\/-]*/gu;
 const ignoredWords = new Set();
 let spellTimer = null;
 
@@ -273,6 +273,7 @@ async function save() {
   try {
     if (target.kind === 'entry') {
       await invoke('write_entry', { date: target.date, content });
+      updateTagsFor(target.date, content);
       if (!target.onDisk) {
         target.onDisk = true;
         renderCalendar();
@@ -537,10 +538,182 @@ function showReport(report) {
     el('div', { className: 'actions' }, el('button', { className: 'primary', textContent: 'Done', onclick: () => {
       closeImport();
       renderCalendar();
+      loadTags();
       if (doc?.kind === 'entry') openEntry(doc.date);
     } })),
   );
 }
+
+// ---------- tags ----------
+
+// Same rule as the Rust side: # then a letter, at a line start or after a
+// space or bracket.
+const TAG = /(^|[\s(])#(\p{L}[\p{L}\p{N}_\/-]*)/gu;
+const TAG_BEFORE_CARET = /(?:^|[\s(])#(\p{L}[\p{L}\p{N}_\/-]*)$/u;
+
+let tags = new Map(); // lower-case name -> { name, dates: Set of YYYY-MM-DD }
+let openTag = null;
+let suggest = { items: [], index: 0, start: 0, end: 0 };
+
+function tagsIn(text) {
+  const found = new Map();
+  for (const m of text.matchAll(TAG)) {
+    const name = m[2].replace(/[-/]+$/, '');
+    found.set(name.toLowerCase(), name);
+  }
+  return found;
+}
+
+async function loadTags() {
+  const list = await invoke('all_tags').catch(() => []);
+  tags = new Map(list.map((t) => [t.name.toLowerCase(), { name: t.name, dates: new Set(t.dates) }]));
+  renderTags();
+}
+
+// After saving an entry, update the tag list from that entry alone.
+function updateTagsFor(date, text) {
+  for (const t of tags.values()) t.dates.delete(date);
+  for (const [key, name] of tagsIn(text)) {
+    if (!tags.has(key)) tags.set(key, { name, dates: new Set() });
+    tags.get(key).dates.add(date);
+  }
+  for (const [key, t] of tags) if (!t.dates.size) tags.delete(key);
+  renderTags();
+}
+
+const byUse = (a, b) => b.dates.size - a.dates.size || a.name.localeCompare(b.name);
+
+function renderTags() {
+  const section = $('tags-section');
+  section.hidden = settings.hide_tags || tags.size === 0;
+  if (section.hidden) return;
+
+  const list = $('tag-list');
+  list.replaceChildren();
+  for (const t of [...tags.values()].sort(byUse)) {
+    const key = t.name.toLowerCase();
+    const button = el('button', { className: 'tag-name', title: 'Show entries with this tag' },
+      el('span', { textContent: `#${t.name}` }),
+      el('span', { className: 'count', textContent: String(t.dates.size) }));
+    button.classList.toggle('selected', openTag === key);
+    button.addEventListener('click', () => {
+      openTag = openTag === key ? null : key;
+      renderTags();
+    });
+    const item = el('li', {}, button);
+
+    if (openTag === key) {
+      const dates = el('ul', { className: 'tag-dates' });
+      for (const date of [...t.dates].sort().reverse()) {
+        const d = parseIso(date);
+        const label = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+        const open = el('button', { textContent: label });
+        open.classList.toggle('selected', doc?.kind === 'entry' && doc.date === date);
+        open.addEventListener('click', () => openEntry(date));
+        dates.append(el('li', {}, open));
+      }
+      item.append(dates);
+    }
+    list.append(item);
+  }
+}
+
+// ---------- tag suggestions while typing ----------
+
+function hideSuggest() {
+  $('tag-suggest').hidden = true;
+  suggest.items = [];
+}
+
+function caretRect() {
+  const sel = window.getSelection();
+  if (!sel.rangeCount) return null;
+  const range = sel.getRangeAt(0);
+  const rect = range.getClientRects()[0];
+  if (rect) return rect;
+  const node = range.startContainer;
+  return (node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement)?.getBoundingClientRect() ?? null;
+}
+
+function updateSuggestions() {
+  if (Editor.raw || doc?.kind !== 'entry') return hideSuggest();
+  const caret = Editor.caret;
+  const m = TAG_BEFORE_CARET.exec(Editor.value.slice(Math.max(0, caret - 80), caret));
+  if (!m) return hideSuggest();
+
+  const typed = m[1].toLowerCase();
+  const items = [...tags.values()]
+    .filter((t) => {
+      const name = t.name.toLowerCase();
+      // Skip the half-typed tag itself if it was saved mid-word.
+      const onlyHere = t.dates.size === 1 && t.dates.has(doc.date);
+      return name.startsWith(typed) && name !== typed && !onlyHere;
+    })
+    .sort(byUse)
+    .slice(0, 6);
+  if (!items.length) return hideSuggest();
+
+  suggest = { items, index: 0, start: caret - m[1].length, end: caret };
+  drawSuggest();
+  const rect = caretRect();
+  const box = $('tag-suggest');
+  if (rect) {
+    box.style.left = `${Math.min(rect.left, window.innerWidth - box.offsetWidth - 8)}px`;
+    const below = rect.bottom + 4;
+    box.style.top = `${below + box.offsetHeight > window.innerHeight ? rect.top - box.offsetHeight - 4 : below}px`;
+  }
+}
+
+function drawSuggest() {
+  const box = $('tag-suggest');
+  box.replaceChildren(...suggest.items.map((t, i) => {
+    const option = el('button', { role: 'option' },
+      el('span', { textContent: `#${t.name}` }),
+      el('span', { className: 'count', textContent: String(t.dates.size) }));
+    option.classList.toggle('on', i === suggest.index);
+    option.setAttribute('aria-selected', i === suggest.index);
+    option.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      suggest.index = i;
+      acceptSuggestion();
+    });
+    return option;
+  }));
+  box.hidden = false;
+}
+
+function acceptSuggestion() {
+  const t = suggest.items[suggest.index];
+  if (!t) return;
+  const { start, end } = suggest;
+  hideSuggest();
+  Editor.replace(start, end, `${t.name} `);
+}
+
+// While suggestions show, ↑ ↓ choose, Return or Tab accept, Esc closes.
+$('editor').addEventListener('keydown', (e) => {
+  if ($('tag-suggest').hidden) return;
+  const handled = () => {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  };
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    handled();
+    const n = suggest.items.length;
+    suggest.index = (suggest.index + (e.key === 'ArrowDown' ? 1 : n - 1)) % n;
+    drawSuggest();
+  } else if (e.key === 'Enter' || e.key === 'Tab') {
+    handled();
+    acceptSuggestion();
+  } else if (e.key === 'Escape') {
+    handled();
+    hideSuggest();
+  }
+}, true);
+
+$('editor').addEventListener('blur', hideSuggest);
+$('editor').addEventListener('scroll', hideSuggest);
+$('editor').addEventListener('mousedown', hideSuggest);
 
 // ---------- journal folder ----------
 
@@ -557,6 +730,169 @@ async function chooseFolder() {
     setStatus(String(e));
   }
 }
+
+// ---------- settings ----------
+
+const tilde = (path) => path.replace(/^\/Users\/[^/]+/, '~');
+let settings = {
+  appearance: '',
+  accent: '',
+  reminder: false,
+  reminder_time: '21:00',
+  reminder_message: '',
+  hide_tags: false,
+};
+
+function applyAccent(accent) {
+  if (accent) document.documentElement.dataset.accent = accent;
+  else delete document.documentElement.dataset.accent;
+}
+
+function showSettingsState() {
+  $('settings-path').textContent = journal ? tilde(journal) : 'No folder chosen';
+  for (const b of document.querySelectorAll('[data-appearance]')) {
+    const on = b.dataset.appearance === settings.appearance;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-checked', on);
+  }
+  for (const b of document.querySelectorAll('.swatch')) {
+    const on = b.dataset.accent === settings.accent;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-checked', on);
+  }
+  $('reminder-on').checked = settings.reminder;
+  $('reminder-time').value = settings.reminder_time;
+  $('reminder-message').value = settings.reminder_message;
+  $('tags-on').checked = !settings.hide_tags;
+}
+
+function reminderStatus(text, error = false) {
+  const p = $('reminder-status');
+  p.textContent = text;
+  p.classList.toggle('error', error);
+  p.hidden = !text;
+}
+
+async function saveReminder() {
+  settings.reminder = $('reminder-on').checked;
+  settings.reminder_time = $('reminder-time').value || '21:00';
+  settings.reminder_message = $('reminder-message').value;
+  try {
+    await invoke('set_reminder', {
+      enabled: settings.reminder,
+      time: settings.reminder_time,
+      message: settings.reminder_message,
+    });
+    reminderStatus(settings.reminder ? `Reminder set for ${settings.reminder_time} on days with no entry.` : 'Reminder off.');
+  } catch (e) {
+    reminderStatus(String(e), true);
+  }
+}
+
+$('reminder-on').addEventListener('change', saveReminder);
+$('reminder-time').addEventListener('change', saveReminder);
+$('reminder-message').addEventListener('change', saveReminder);
+$('reminder-test').addEventListener('click', async () => {
+  try {
+    await invoke('test_reminder', { message: $('reminder-message').value });
+    reminderStatus('Test sent. If nothing appeared, check System Settings → Notifications → Diary.');
+  } catch (e) {
+    reminderStatus(String(e), true);
+  }
+});
+
+$('tags-on').addEventListener('change', async () => {
+  settings.hide_tags = !$('tags-on').checked;
+  renderTags();
+  await invoke('set_hide_tags', { hide: settings.hide_tags }).catch((e) => setStatus(String(e)));
+});
+
+async function openSettings() {
+  await save();
+  $('move-status').hidden = true;
+  reminderStatus('');
+  showSettingsState();
+  $('settings').hidden = false;
+  $('settings-done').focus();
+}
+
+function closeSettings() {
+  $('settings').hidden = true;
+  Editor.focus();
+}
+
+function moveStatus(message, { error = false, actions = [] } = {}) {
+  const box = $('move-status');
+  box.className = error ? 'error' : '';
+  box.replaceChildren(el('p', { textContent: message }), ...(actions.length ? [el('div', { className: 'buttons' }, ...actions)] : []));
+  box.hidden = false;
+}
+
+async function moveFolder(allowCloud = false, chosen = null) {
+  await save();
+  const destination = chosen ?? await invoke('choose_folder', { title: 'Choose where to move your diary' }).catch(() => null);
+  if (!destination) return;
+
+  const buttons = [$('move-folder'), $('other-folder')];
+  buttons.forEach((b) => { b.disabled = true; });
+  moveStatus('Copying and checking your diary…');
+  try {
+    clearTimeout(commitTimer);
+    journal = await invoke('move_journal', { destination, allowCloud });
+    $('journal-path').textContent = tilde(journal);
+    showSettingsState();
+    moveStatus(`Moved to ${tilde(journal)}. The old folder is still in its original place; delete it once you're happy everything is here.`, {
+      actions: [el('button', { className: 'secondary', textContent: 'Show Old Folder', onclick: () => invoke('reveal_previous') })],
+    });
+    if (doc?.kind === 'entry') openEntry(doc.date);
+    renderCalendar();
+    loadTags();
+  } catch (e) {
+    if (String(e) === 'CLOUD') {
+      moveStatus('That folder syncs to an online service, so your diary would be copied onto someone else’s servers. Move it there anyway?', {
+        actions: [
+          el('button', { className: 'link', textContent: 'Cancel', onclick: () => { $('move-status').hidden = true; } }),
+          el('button', { className: 'secondary', textContent: 'Move Anyway', onclick: () => moveFolder(true, destination) }),
+        ],
+      });
+    } else {
+      moveStatus(String(e), { error: true });
+    }
+  } finally {
+    buttons.forEach((b) => { b.disabled = false; });
+  }
+}
+
+for (const b of document.querySelectorAll('[data-appearance]')) {
+  b.addEventListener('click', async () => {
+    settings.appearance = b.dataset.appearance;
+    showSettingsState();
+    await invoke('set_appearance', { appearance: settings.appearance }).catch((e) => setStatus(String(e)));
+  });
+}
+
+for (const b of document.querySelectorAll('.swatch')) {
+  b.addEventListener('click', async () => {
+    settings.accent = b.dataset.accent;
+    applyAccent(settings.accent);
+    showSettingsState();
+    await invoke('set_accent', { accent: settings.accent }).catch((e) => setStatus(String(e)));
+  });
+}
+
+$('move-folder').addEventListener('click', () => moveFolder());
+$('other-folder').addEventListener('click', async () => {
+  await chooseFolder();
+  showSettingsState();
+});
+$('settings-done').addEventListener('click', closeSettings);
+$('settings').addEventListener('click', (e) => { if (e.target === $('settings')) closeSettings(); });
+$('settings').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    e.stopPropagation();
+    closeSettings();
+  }
+});
 
 // ---------- zen ----------
 
@@ -582,6 +918,10 @@ const COMMANDS = {
   bold: () => Editor.wrap('**'),
   italic: () => Editor.wrap('*'),
   strike: () => Editor.wrap('~~'),
+  bullets: () => Editor.list('bullet'),
+  numbers: () => Editor.list('number'),
+  indent: () => Editor.indent(1),
+  outdent: () => Editor.indent(-1),
   undo: () => Editor.undo(),
   redo: () => Editor.redo(),
 };
@@ -597,13 +937,17 @@ document.addEventListener('mousemove', () => {
 function start() {
   $('welcome').hidden = true;
   $('app').hidden = false;
-  $('journal-path').textContent = journal.replace(/^\/Users\/[^/]+/, '~');
+  $('journal-path').textContent = tilde(journal);
   goToday();
+  loadTags();
 }
 
 // ---------- wiring ----------
 
-Editor.onChange = markDirty;
+Editor.onChange = () => {
+  markDirty();
+  updateSuggestions();
+};
 window.addEventListener('blur', save);
 
 // Toolbar buttons act on the text without taking focus from it.
@@ -621,7 +965,7 @@ document.addEventListener('mousedown', (e) => {
 $('editor').addEventListener('scroll', closeSpellMenu);
 
 $('choose').addEventListener('click', chooseFolder);
-$('journal-path').addEventListener('click', chooseFolder);
+$('journal-path').addEventListener('click', openSettings);
 $('import-button').addEventListener('click', startImport);
 $('import-dialog').addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
@@ -682,6 +1026,7 @@ listen('menu', ({ payload }) => {
     case 'zen': toggleZen(); break;
     case 'raw': toggleRaw(); break;
     case 'import': startImport(); break;
+    case 'settings': openSettings(); break;
     case 'folder': chooseFolder(); break;
   }
 });
@@ -696,6 +1041,8 @@ listen('app-quit', async () => {
 });
 
 (async () => {
+  settings = await invoke('get_settings').catch(() => settings);
+  applyAccent(settings.accent);
   journal = await invoke('get_journal');
   if (journal) start();
   else $('welcome').hidden = false;

@@ -25,13 +25,17 @@ The finished app needs none of these. `cargo tauri dev` runs it without installi
 | Past days | Click the calendar (dot = entry, ring = today) |
 | Headings | H1 / H2 / H3 in the toolbar, or ⌘1 ⌘2 ⌘3. Click again to remove |
 | Bold / Italic / Strikethrough | **B** / **S** in the toolbar, or ⌘B ⌘I ⇧⌘X. Click again to remove |
+| Lists | **•** / **1.** in the toolbar, or ⇧⌘8 / ⇧⌘7. Return continues a list; Return on an empty item ends it |
+| Indent list items | Tab / ⇧Tab, ⌘] / ⌘[, or ⇥ / ⇤ in the toolbar |
 | Raw Markdown | **Raw** or ⇧⌘R. Shows and edits the exact file contents |
 | Zen mode | ⌘. or **Zen**. Leave with Esc, ⌘. or the Exit Zen button (move the mouse) |
 | Spelling | Wavy red underline; right-click for suggestions, Learn Spelling or Ignore |
 | Attach a file or picture | Drag it in (from Finder, Photos, anywhere) or paste it. It's saved in that day's folder and pictures show in the entry |
 | Photo from iPhone | Right-click in the entry → Import from iPhone → Take Photo |
 | Import old entries | File → Import Old Entries… or the sidebar link |
-| Change diary folder | ⌘, |
+| Settings | ⌘, or click the folder path in the sidebar: move the diary, choose another folder, appearance, accent colour, reminder, tags |
+| #tags | Type `#` and a word anywhere. Suggestions appear as you type (↑ ↓, Return or Tab to accept). The sidebar lists every tag; click one to see its dates |
+| Evening reminder | Settings → Reminder. A notification at your chosen time (default 21:00) if today has no entry, even when Diary is closed |
 
 Autosave runs about a second after you stop typing. Git snapshots are taken
 after two quiet minutes, on quit, and on launch if files changed outside the app.

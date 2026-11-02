@@ -26,8 +26,8 @@ const Editor = (() => {
   const md = (s) => `<span class="md">${esc(s)}</span>`;
   const IMAGE_LINE = /^\s*!\[[^\]]*\]\(<?([^)>\s]+)>?\)\s*$/;
 
-  // **bold** __bold__ | ~~strike~~ | *italic* | `code` | [link](url) ![image](path)
-  const INLINE = /(\*\*|__)(\S(?:.*?\S)?)\1|~~(\S(?:.*?\S)?)~~|\*(\S(?:.*?\S)?)\*|`([^`]+)`|(!?\[)([^\]]*)(\]\([^)]*\))/g;
+  // **bold** __bold__ | ~~strike~~ | *italic* | `code` | [link](url) ![image](path) | #tag
+  const INLINE = /(\*\*|__)(\S(?:.*?\S)?)\1|~~(\S(?:.*?\S)?)~~|\*(\S(?:.*?\S)?)\*|`([^`]+)`|(!?\[)([^\]]*)(\]\([^)]*\))|(^|[\s(])(#\p{L}[\p{L}\p{N}_\/-]*)/gu;
 
   function inline(s) {
     let out = '';
@@ -38,7 +38,8 @@ const Editor = (() => {
       else if (m[3] !== undefined) out += md('~~') + `<del>${esc(m[3])}</del>` + md('~~');
       else if (m[4] !== undefined) out += md('*') + `<em>${esc(m[4])}</em>` + md('*');
       else if (m[5] !== undefined) out += md('`') + `<code>${esc(m[5])}</code>` + md('`');
-      else out += md(m[6]) + `<span class="link">${esc(m[7])}</span>` + md(m[8]);
+      else if (m[6] !== undefined) out += md(m[6]) + `<span class="link">${esc(m[7])}</span>` + md(m[8]);
+      else out += esc(m[9]) + `<span class="tag">${esc(m[10])}</span>`;
       last = m.index + m[0].length;
     }
     return out + esc(s.slice(last));
@@ -292,6 +293,88 @@ const Editor = (() => {
     commit(text.slice(0, a) + wrapped + text.slice(b), a + n, a + wrapped.length - n, 'format', before);
   }
 
+  // ---------- lists ----------
+
+  const INDENT = '    '; // four spaces: what Markdown expects for nested numbered lists
+  const LIST = /^(\s*)([-*+]|(\d+)[.)])(\s+)/;
+
+  // Apply fn to every line the selection touches, keeping the selection on
+  // the same text afterwards.
+  function changeLines(fn) {
+    const before = selection();
+    const [a, b] = before;
+    const [start, end] = lineBounds(a, b);
+    const lines = text.slice(start, end).split('\n');
+    const next = fn(lines);
+    const block = next.join('\n');
+    const firstDelta = next[0].length - lines[0].length;
+    const totalDelta = block.length - (end - start);
+    commit(
+      text.slice(0, start) + block + text.slice(end),
+      Math.max(start, a + firstDelta),
+      Math.max(start, b + totalDelta),
+      'format',
+      before,
+    );
+  }
+
+  const isBullet = (l) => /^\s*[-*+]\s/.test(l);
+  const isNumbered = (l) => /^\s*\d+[.)]\s/.test(l);
+
+  // Turn the lines into a bulleted or numbered list, or back to plain text
+  // if they already are one.
+  function list(kind) {
+    changeLines((lines) => {
+      const filled = lines.filter((l) => l.trim());
+      const test = kind === 'bullet' ? isBullet : isNumbered;
+      const already = filled.length > 0 && filled.every(test);
+      let n = 0;
+      return lines.map((l) => {
+        if (!l.trim() && lines.length > 1) return l;
+        const m = LIST.exec(l);
+        const indent = m ? m[1] : /^\s*/.exec(l)[0];
+        const body = m ? l.slice(m[0].length) : l.slice(indent.length);
+        if (already) return indent + body;
+        n += 1;
+        return `${indent}${kind === 'bullet' ? '-' : `${n}.`} ${body}`;
+      });
+    });
+  }
+
+  // Indent or outdent list items. Plain paragraphs aren't indented, because
+  // four leading spaces would turn them into a code block in Markdown.
+  function indent(direction) {
+    changeLines((lines) =>
+      lines.map((l) => {
+        if (!LIST.test(l)) return l;
+        if (direction > 0) return INDENT + l;
+        return l.replace(/^( {1,4}|\t)/, '');
+      }),
+    );
+  }
+
+  // Return in a list continues it; Return on an empty item ends the list
+  // (or steps out one level if it's indented). Returns false if the caret
+  // isn't in a list, so a plain new line is inserted instead.
+  function continueList(before) {
+    const [a, b] = before;
+    const start = text.lastIndexOf('\n', a - 1) + 1;
+    const line = text.slice(start, text.indexOf('\n', a) < 0 ? text.length : text.indexOf('\n', a));
+    const m = LIST.exec(line);
+    if (!m || a - start < m[0].length) return false;
+
+    if (!line.slice(m[0].length).trim()) {
+      const out = m[1] ? line.replace(/^( {1,4}|\t)/, '') : '';
+      const end = start + line.length;
+      commit(text.slice(0, start) + out + text.slice(end), start + out.length, start + out.length, 'other', before);
+      return true;
+    }
+
+    const marker = m[3] ? `${Number(m[3]) + 1}${m[2].slice(-1)}` : m[2];
+    edit(a, b, `\n${m[1]}${marker}${m[4]}`, 'other', before);
+    return true;
+  }
+
   // ---------- styled view input ----------
 
   const FORMAT_MARKERS = { formatBold: '**', formatItalic: '*', formatStrikeThrough: '~~' };
@@ -333,6 +416,12 @@ const Editor = (() => {
       insert = e.data ?? e.dataTransfer?.getData('text/plain') ?? '';
     } else if (t === 'insertParagraph' || t === 'insertLineBreak') {
       insert = '\n';
+      e.preventDefault();
+      const before = selection();
+      if (continueList(before)) return;
+      const [a, b] = targetRange(e, before);
+      edit(a, b, insert, 'other', before);
+      return;
     } else if (t.startsWith('delete')) {
       insert = '';
     } else {
@@ -375,6 +464,16 @@ const Editor = (() => {
     edit(a, b, '', 'other', sel);
   });
   root.addEventListener('dragstart', (e) => e.preventDefault());
+
+  // Tab and ⇧Tab indent and outdent list items.
+  root.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab' || e.metaKey || e.altKey || e.ctrlKey) return;
+    const [a, b] = selection();
+    const [start, end] = lineBounds(a, b);
+    if (!text.slice(start, end).split('\n').some((l) => LIST.test(l))) return;
+    e.preventDefault();
+    indent(e.shiftKey ? -1 : 1);
+  });
 
   // If macOS slipped a picture straight into the page, save it properly and
   // take it out of the page again.
@@ -537,6 +636,8 @@ const Editor = (() => {
     redo: () => step(history.redo, history.undo),
     heading,
     wrap,
+    list,
+    indent,
     markSpelling,
     misspellingAt,
   };

@@ -37,9 +37,14 @@
         <input id="new-template" type="text" placeholder="Template name, then Return" maxlength="64" hidden>
       </section>
 
+      <section id="tags-section" class="tags" hidden>
+        <h2>Tags</h2>
+        <ul id="tag-list"></ul>
+      </section>
+
       <footer>
         <button id="import-button" class="link">Import old entries…</button>
-        <button id="journal-path" class="link" title="Change diary folder (⌘,)"></button>
+        <button id="journal-path" class="link" title="Settings (⌘,)"></button>
       </footer>
     </aside>
 
@@ -52,6 +57,11 @@
           <span class="sep"></span>
           <button data-cmd="bold" title="Bold (⌘B)"><b>B</b></button>
           <button data-cmd="strike" title="Strikethrough (⇧⌘X)"><s>S</s></button>
+          <span class="sep"></span>
+          <button data-cmd="bullets" title="Bulleted list (⇧⌘8)">•</button>
+          <button data-cmd="numbers" title="Numbered list (⇧⌘7)">1.</button>
+          <button data-cmd="outdent" title="Outdent (⇧Tab or ⌘[)">⇤</button>
+          <button data-cmd="indent" title="Indent (Tab or ⌘])">⇥</button>
         </div>
         <span id="doc-title"></span>
         <div class="right">
@@ -68,6 +78,7 @@
   <button id="zen-exit" class="link" title="Exit Zen (Esc or ⌘.)">Exit Zen</button>
 
   <div id="spell-menu" role="menu" hidden></div>
+  <div id="tag-suggest" role="listbox" aria-label="Tag suggestions" hidden></div>
 
   <div id="picker" class="overlay" hidden>
     <div class="picker-card">
@@ -78,6 +89,71 @@
 
   <div id="import-dialog" class="overlay" hidden>
     <div id="import-body" class="picker-card import-card"></div>
+  </div>
+
+  <div id="settings" class="overlay" hidden>
+    <div class="picker-card settings-card" role="dialog" aria-labelledby="settings-title">
+      <h2 id="settings-title">Settings</h2>
+
+      <section>
+        <h3>Diary folder</h3>
+        <p id="settings-path" class="path"></p>
+        <div class="buttons">
+          <button id="move-folder" class="secondary">Move…</button>
+          <button id="other-folder" class="secondary">Choose Another…</button>
+        </div>
+        <p class="hint">Move copies your whole diary, history included, checks the copy, then switches to it. The old folder is left untouched until you delete it.</p>
+        <div id="move-status" hidden></div>
+      </section>
+
+      <section>
+        <h3>Appearance</h3>
+        <div class="segmented" role="radiogroup" aria-label="Appearance">
+          <button data-appearance="" role="radio">Match Mac</button>
+          <button data-appearance="light" role="radio">Light</button>
+          <button data-appearance="dark" role="radio">Dark</button>
+        </div>
+      </section>
+
+      <section>
+        <h3>Accent colour</h3>
+        <div class="swatches" role="radiogroup" aria-label="Accent colour">
+          <button class="swatch" data-accent="" role="radio" title="Walnut"></button>
+          <button class="swatch" data-accent="blue" role="radio" title="Ink blue"></button>
+          <button class="swatch" data-accent="green" role="radio" title="Moss"></button>
+          <button class="swatch" data-accent="plum" role="radio" title="Plum"></button>
+          <button class="swatch" data-accent="slate" role="radio" title="Slate"></button>
+          <button class="swatch" data-accent="red" role="radio" title="Brick"></button>
+        </div>
+      </section>
+
+      <section>
+        <h3>Reminder</h3>
+        <label class="check">
+          <input id="reminder-on" type="checkbox">
+          Remind me if I haven't written by
+          <input id="reminder-time" type="time" value="21:00">
+        </label>
+        <input id="reminder-message" type="text" maxlength="120" placeholder="You haven't written in your diary today." aria-label="Reminder message">
+        <div class="buttons">
+          <button id="reminder-test" class="secondary">Send Test</button>
+        </div>
+        <p class="hint">Works even when Diary is closed. The first time, macOS may ask whether Diary can send notifications; you can change this later in System Settings → Notifications.</p>
+        <p id="reminder-status" class="hint" hidden></p>
+      </section>
+
+      <section>
+        <h3>Tags</h3>
+        <label class="check">
+          <input id="tags-on" type="checkbox">
+          Show tags in the sidebar
+        </label>
+      </section>
+
+      <div class="actions">
+        <button id="settings-done" class="primary">Done</button>
+      </div>
+    </div>
   </div>
 
   <script src="editor.js"></script>

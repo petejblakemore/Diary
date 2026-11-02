@@ -23,6 +23,22 @@
   }
 }
 
+/* Accent colours, each with a light and a dark version that stay readable
+   as text on the page and as a button with page-coloured text on it. */
+:root[data-accent="blue"]  { --accent: #2f5f8f; --dot: #6b93bd; }
+:root[data-accent="green"] { --accent: #3f6b45; --dot: #7ba182; }
+:root[data-accent="plum"]  { --accent: #6e3f6b; --dot: #a87aa4; }
+:root[data-accent="slate"] { --accent: #4a5563; --dot: #8794a3; }
+:root[data-accent="red"]   { --accent: #9a3b32; --dot: #c9776d; }
+
+@media (prefers-color-scheme: dark) {
+  :root[data-accent="blue"]  { --accent: #8fb6e0; --dot: #6f9ac7; }
+  :root[data-accent="green"] { --accent: #9cc7a2; --dot: #7fae86; }
+  :root[data-accent="plum"]  { --accent: #d0a3cc; --dot: #b986b4; }
+  :root[data-accent="slate"] { --accent: #aab6c4; --dot: #8d9aa8; }
+  :root[data-accent="red"]   { --accent: #e39a90; --dot: #cf7f74; }
+}
+
 * { box-sizing: border-box; }
 
 html, body {
@@ -277,6 +293,8 @@ button.link:hover { color: var(--ink); }
 #editor .h3 { font-size: 1.12em; line-height: 1.4; font-weight: bold; margin: 0.35em 0 0.1em; }
 #editor .h4, #editor .h5, #editor .h6 { font-weight: bold; }
 #editor .quote { border-left: 3px solid var(--rule); padding-left: 0.8em; font-style: italic; color: var(--muted); }
+/* List markers are part of the structure, so they're less faded. */
+#editor .li > .md { color: var(--accent); opacity: 0.8; }
 #editor .rule { text-align: center; letter-spacing: 0.3em; }
 #editor strong { font-weight: bold; }
 #editor em { font-style: italic; }
@@ -362,6 +380,70 @@ body.zen #zen-exit:hover { opacity: 1; pointer-events: auto; }
 #spell-menu .none { display: block; padding: 5px 10px; color: var(--muted); }
 #spell-menu hr { border: 0; border-top: 1px solid var(--rule); margin: 4px 0; }
 
+/* ---------- tags ---------- */
+
+#editor .tag { color: var(--accent); }
+
+.tags h2 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 0 0 6px;
+}
+
+.tags ul { list-style: none; margin: 0; padding: 0; }
+
+.tags .tag-name {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 8px;
+  border-radius: 5px;
+  color: var(--accent);
+}
+
+.tags .tag-name:hover { background: var(--rule); }
+.tags .tag-name.selected { background: var(--rule); }
+.tags .count, #tag-suggest .count { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+
+.tags .tag-dates { margin: 2px 0 6px 10px; border-left: 1px solid var(--rule); max-height: 220px; overflow-y: auto; }
+
+.tags .tag-dates button {
+  width: 100%;
+  text-align: left;
+  padding: 3px 8px;
+  font-size: 12px;
+  border-radius: 0 5px 5px 0;
+}
+
+.tags .tag-dates button:hover { background: var(--rule); }
+.tags .tag-dates button.selected { background: var(--accent); color: var(--paper); }
+
+#tag-suggest {
+  position: fixed;
+  z-index: 10;
+  min-width: 180px;
+  padding: 4px;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+  font-size: 13px;
+}
+
+#tag-suggest button {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 5px 9px;
+  border-radius: 5px;
+}
+
+#tag-suggest button.on { background: var(--accent); color: var(--paper); }
+#tag-suggest button.on .count { color: inherit; opacity: 0.8; }
+
 /* ---------- template picker ---------- */
 
 .overlay {
@@ -421,3 +503,75 @@ body.zen #zen-exit:hover { opacity: 1; pointer-events: auto; }
 }
 
 .import-card button:disabled { opacity: 0.5; cursor: default; }
+
+/* ---------- settings ---------- */
+
+.settings-card { width: min(460px, calc(100vw - 48px)); max-height: calc(100vh - 48px); overflow-y: auto; line-height: 1.5; }
+
+.settings-card .check { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+
+.settings-card input[type="time"],
+.settings-card input[type="text"] {
+  font: inherit;
+  padding: 4px 8px;
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.settings-card input[type="text"] { width: 100%; margin-bottom: 8px; }
+.settings-card p.error { color: #b5483b; }
+.settings-card h2 { font-size: 15px; margin-bottom: 14px; }
+.settings-card section { padding: 12px 0; border-top: 1px solid var(--rule); }
+.settings-card h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 8px; }
+.settings-card .path { margin: 0 0 8px; font-family: var(--mono); font-size: 12px; word-break: break-all; }
+.settings-card .hint { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
+.settings-card .buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+.settings-card .actions { display: flex; justify-content: flex-end; margin-top: 8px; }
+
+button.secondary {
+  padding: 5px 12px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--side);
+}
+button.secondary:hover { border-color: var(--muted); }
+button.secondary:disabled { opacity: 0.5; cursor: default; }
+
+#move-status { margin-top: 10px; padding: 8px 10px; border-radius: 6px; background: var(--side); font-size: 12px; }
+#move-status p { margin: 0 0 6px; }
+#move-status p:last-child { margin: 0; }
+#move-status.error { color: #b5483b; }
+
+.segmented { display: inline-flex; border: 1px solid var(--rule); border-radius: 7px; overflow: hidden; }
+.segmented button { padding: 5px 14px; }
+.segmented button + button { border-left: 1px solid var(--rule); }
+.segmented button.on { background: var(--accent); color: var(--paper); }
+
+.swatches { display: flex; gap: 10px; }
+
+.swatch {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+}
+.swatch.on { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+/* Each swatch shows its own colour, light or dark to match the page. */
+.swatch[data-accent=""]      { background: #7a5c3e; }
+.swatch[data-accent="blue"]  { background: #2f5f8f; }
+.swatch[data-accent="green"] { background: #3f6b45; }
+.swatch[data-accent="plum"]  { background: #6e3f6b; }
+.swatch[data-accent="slate"] { background: #4a5563; }
+.swatch[data-accent="red"]   { background: #9a3b32; }
+
+@media (prefers-color-scheme: dark) {
+  .swatch[data-accent=""]      { background: #d2b48c; }
+  .swatch[data-accent="blue"]  { background: #8fb6e0; }
+  .swatch[data-accent="green"] { background: #9cc7a2; }
+  .swatch[data-accent="plum"]  { background: #d0a3cc; }
+  .swatch[data-accent="slate"] { background: #aab6c4; }
+  .swatch[data-accent="red"]   { background: #e39a90; }
+}

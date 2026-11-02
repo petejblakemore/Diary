@@ -8,7 +8,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod import;
+mod reminder;
 mod spelling;
+mod tags;
 
 use chrono::{Datelike, Local, NaiveDate};
 use git2::{IndexAddOption, Repository, Signature};
@@ -18,7 +20,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WindowEvent};
 
 const DEFAULT_DAY: &str = "# {{weekday}}, {{date}}\n\n## {{time}}\n\n";
@@ -30,14 +32,29 @@ static QUITTING: AtomicBool = AtomicBool::new(false);
 
 struct AppState {
     root: Mutex<Option<PathBuf>>,
+    /// Where the diary was before its last move, so it can be shown in Finder.
+    previous: Mutex<Option<PathBuf>>,
 }
 
 /// App settings, stored in ~/Library/Application Support/com.pete.diary/,
 /// never inside the journal folder.
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Clone)]
+#[serde(default)]
 struct Config {
     journal: Option<PathBuf>,
+    /// "light", "dark", or "" to match the Mac.
+    appearance: String,
+    /// One of ACCENTS, or "" for the default.
+    accent: String,
+    /// The evening reminder: on/off, "HH:MM", and the notification text.
+    reminder: bool,
+    reminder_time: String,
+    reminder_message: String,
+    /// Hide the tag list in the sidebar.
+    hide_tags: bool,
 }
+
+const ACCENTS: [&str; 6] = ["brown", "blue", "green", "plum", "slate", "red"];
 
 fn err<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
@@ -209,10 +226,207 @@ async fn choose_folder(app: AppHandle, title: Option<String>) -> Result<Option<S
 fn set_journal(app: AppHandle, state: State<'_, AppState>, path: String) -> Result<String, String> {
     let root = PathBuf::from(path);
     prepare_journal(&root)?;
-    save_config(&app, &Config { journal: Some(root.clone()) })?;
+    let mut config = load_config(&app);
+    config.journal = Some(root.clone());
+    save_config(&app, &config)?;
     allow_pictures(&app, &root);
     *state.root.lock().unwrap() = Some(root.clone());
     Ok(root.display().to_string())
+}
+
+// ---------- settings ----------
+
+#[derive(Serialize)]
+struct Settings {
+    appearance: String,
+    accent: String,
+    reminder: bool,
+    reminder_time: String,
+    reminder_message: String,
+    hide_tags: bool,
+}
+
+#[tauri::command]
+fn get_settings(app: AppHandle) -> Settings {
+    let config = load_config(&app);
+    Settings {
+        appearance: config.appearance,
+        accent: config.accent,
+        reminder: config.reminder,
+        reminder_time: if config.reminder_time.is_empty() {
+            reminder::DEFAULT_TIME.into()
+        } else {
+            config.reminder_time
+        },
+        reminder_message: if config.reminder_message.is_empty() {
+            reminder::DEFAULT_MESSAGE.into()
+        } else {
+            config.reminder_message
+        },
+        hide_tags: config.hide_tags,
+    }
+}
+
+#[tauri::command]
+fn set_reminder(app: AppHandle, enabled: bool, time: String, message: String) -> Result<(), String> {
+    reminder::parse_time(&time).ok_or("Please enter a time like 21:00")?;
+    let mut config = load_config(&app);
+    config.reminder = enabled;
+    config.reminder_time = time.clone();
+    config.reminder_message = message.trim().to_string();
+    save_config(&app, &config)?;
+    if enabled {
+        reminder::install(&time)
+    } else {
+        reminder::uninstall();
+        Ok(())
+    }
+}
+
+#[tauri::command]
+fn test_reminder(message: String) -> Result<(), String> {
+    let message = message.trim();
+    reminder::notify(if message.is_empty() { reminder::DEFAULT_MESSAGE } else { message })
+}
+
+#[tauri::command]
+fn set_hide_tags(app: AppHandle, hide: bool) -> Result<(), String> {
+    let mut config = load_config(&app);
+    config.hide_tags = hide;
+    save_config(&app, &config)
+}
+
+/// Light, dark or match the Mac. Setting the window's appearance also
+/// switches the page, its title bar and menus.
+fn apply_appearance(app: &AppHandle, appearance: &str) {
+    let theme = match appearance {
+        "light" => Some(tauri::Theme::Light),
+        "dark" => Some(tauri::Theme::Dark),
+        _ => None,
+    };
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.set_theme(theme);
+    }
+}
+
+#[tauri::command]
+fn set_appearance(app: AppHandle, appearance: String) -> Result<(), String> {
+    let appearance = match appearance.as_str() {
+        "light" | "dark" => appearance,
+        _ => String::new(),
+    };
+    let mut config = load_config(&app);
+    config.appearance = appearance.clone();
+    save_config(&app, &config)?;
+    apply_appearance(&app, &appearance);
+    Ok(())
+}
+
+#[tauri::command]
+fn set_accent(app: AppHandle, accent: String) -> Result<(), String> {
+    let mut config = load_config(&app);
+    config.accent = if ACCENTS.contains(&accent.as_str()) { accent } else { String::new() };
+    save_config(&app, &config)
+}
+
+// ---------- moving the diary ----------
+
+/// Folders that sync to someone else's servers.
+fn is_cloud_folder(path: &Path) -> bool {
+    let p = path.to_string_lossy();
+    ["/Library/Mobile Documents/", "/Library/CloudStorage/", "/Dropbox/", "/Google Drive/", "/OneDrive"]
+        .iter()
+        .any(|needle| p.contains(needle))
+}
+
+fn copy_tree(from: &Path, to: &Path) -> Result<(), String> {
+    for entry in walkdir::WalkDir::new(from) {
+        let entry = entry.map_err(err)?;
+        let rel = entry.path().strip_prefix(from).map_err(err)?;
+        let target = to.join(rel);
+        if entry.file_type().is_dir() {
+            fs::create_dir_all(&target).map_err(err)?;
+        } else if entry.file_type().is_file() {
+            fs::copy(entry.path(), &target).map_err(err)?;
+        }
+    }
+    Ok(())
+}
+
+/// Every file in `from` must exist in `to` with identical contents.
+fn verify_copy(from: &Path, to: &Path) -> Result<(), String> {
+    for entry in walkdir::WalkDir::new(from) {
+        let entry = entry.map_err(err)?;
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let rel = entry.path().strip_prefix(from).map_err(err)?;
+        let original = fs::read(entry.path()).map_err(err)?;
+        let copy = fs::read(to.join(rel)).map_err(|_| format!("{} is missing", rel.display()))?;
+        if original != copy {
+            return Err(format!("{} is different", rel.display()));
+        }
+    }
+    Ok(())
+}
+
+/// Copy the whole diary, Git history included, into `destination`, check the
+/// copy matches exactly, then switch to it. The original is left in place.
+#[tauri::command]
+async fn move_journal(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    destination: String,
+    allow_cloud: bool,
+) -> Result<String, String> {
+    let from = fs::canonicalize(journal_root(&state)?).map_err(err)?;
+    let parent = fs::canonicalize(&destination).map_err(err)?;
+    let name = from.file_name().ok_or("This folder can't be moved")?.to_owned();
+    let to = parent.join(&name);
+
+    if to.starts_with(&from) {
+        return Err("The new place can't be inside the diary itself.".into());
+    }
+    if to.exists() {
+        return Err(format!(
+            "There's already a folder called “{}” there. Choose somewhere else, or rename that folder first.",
+            name.to_string_lossy()
+        ));
+    }
+    if is_cloud_folder(&to) && !allow_cloud {
+        return Err("CLOUD".into());
+    }
+
+    commit_all(&from, &format!("Before moving – {}", stamp()))?;
+    copy_tree(&from, &to)?;
+    if let Err(e) = verify_copy(&from, &to) {
+        return Err(format!(
+            "The copy didn't match the original ({e}), so Diary is still using the old folder. \
+             The incomplete copy at {} can be deleted.",
+            to.display()
+        ));
+    }
+
+    prepare_journal(&to)?;
+    let mut config = load_config(&app);
+    config.journal = Some(to.clone());
+    save_config(&app, &config)?;
+    allow_pictures(&app, &to);
+    *state.root.lock().unwrap() = Some(to.clone());
+    *state.previous.lock().unwrap() = Some(from);
+    Ok(to.display().to_string())
+}
+
+/// Show the diary's old location in Finder after a move.
+#[tauri::command]
+fn reveal_previous(state: State<'_, AppState>) -> Result<(), String> {
+    let previous = state.previous.lock().unwrap().clone().ok_or("Nothing to show")?;
+    std::process::Command::new("/usr/bin/open")
+        .arg("-R")
+        .arg(previous)
+        .spawn()
+        .map(|_| ())
+        .map_err(err)
 }
 
 /// Let the page display pictures from the diary folder, and nowhere else.
@@ -376,14 +590,22 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let item = |id: &str, text: &str, key: Option<&str>| MenuItem::with_id(app, id, text, true, key);
     let sep = || PredefinedMenuItem::separator(app);
 
+    let about = AboutMetadata {
+        name: Some("Diary".into()),
+        credits: Some("Made by Pete & Dia".into()),
+        copyright: Some("© 2026 Pete".into()),
+        comments: Some("A private diary that stays on your Mac.".into()),
+        ..Default::default()
+    };
+
     let app_menu = Submenu::with_items(
         app,
         "Diary",
         true,
         &[
-            &PredefinedMenuItem::about(app, None, None)?,
+            &PredefinedMenuItem::about(app, Some("About Diary"), Some(about))?,
             &sep()?,
-            &item("folder", "Change Diary Folder…", Some("CmdOrCtrl+,"))?,
+            &item("settings", "Settings…", Some("CmdOrCtrl+,"))?,
             &sep()?,
             &PredefinedMenuItem::services(app, None)?,
             &sep()?,
@@ -430,6 +652,11 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
             &item("bold", "Bold", Some("CmdOrCtrl+B"))?,
             &item("italic", "Italic", Some("CmdOrCtrl+I"))?,
             &item("strike", "Strikethrough", Some("CmdOrCtrl+Shift+X"))?,
+            &sep()?,
+            &item("bullets", "Bulleted List", Some("CmdOrCtrl+Shift+8"))?,
+            &item("numbers", "Numbered List", Some("CmdOrCtrl+Shift+7"))?,
+            &item("indent", "Indent", Some("CmdOrCtrl+]"))?,
+            &item("outdent", "Outdent", Some("CmdOrCtrl+["))?,
         ],
     )?;
     let view = Submenu::with_items(
@@ -486,14 +713,31 @@ fn finish(app: &AppHandle) {
 }
 
 fn main() {
+    // Started by the evening reminder's background job: check and exit,
+    // without opening a window.
+    if std::env::args().any(|a| a == "--remind") {
+        reminder::run();
+        return;
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
-        .manage(AppState { root: Mutex::new(None) })
+        .manage(AppState { root: Mutex::new(None), previous: Mutex::new(None) })
         .setup(|app| {
             let menu = build_menu(app.handle())?;
             app.set_menu(menu)?;
-            if let Some(root) = load_config(app.handle()).journal {
+            let config = load_config(app.handle());
+            apply_appearance(app.handle(), &config.appearance);
+            if config.reminder {
+                // Keep the background job pointing at this copy of the app.
+                let _ = reminder::install(if config.reminder_time.is_empty() {
+                    reminder::DEFAULT_TIME
+                } else {
+                    &config.reminder_time
+                });
+            }
+            if let Some(root) = config.journal {
                 if root.is_dir() && prepare_journal(&root).is_ok() {
                     allow_pictures(app.handle(), &root);
                     *app.state::<AppState>().root.lock().unwrap() = Some(root);
@@ -516,6 +760,15 @@ fn main() {
             get_journal,
             choose_folder,
             set_journal,
+            get_settings,
+            set_appearance,
+            set_accent,
+            move_journal,
+            reveal_previous,
+            set_reminder,
+            test_reminder,
+            set_hide_tags,
+            tags::all_tags,
             month_entries,
             read_entry,
             write_entry,
