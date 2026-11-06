@@ -51,7 +51,7 @@ const Editor = (() => {
     let m;
     if ((m = /^(#{1,6})(\s+)(.*)$/.exec(line))) {
       cls += ` h${m[1].length}`;
-      body = md(m[1] + m[2]) + inline(m[3]);
+      body = `<span class="md hmark">${esc(m[1] + m[2])}</span>` + inline(m[3]);
     } else if ((m = /^(\s*)([-*+]|\d+[.)])(\s+)(.*)$/.exec(line))) {
       cls += ' li';
       body = esc(m[1]) + md(m[2] + m[3]) + inline(m[4]);
@@ -140,7 +140,22 @@ const Editor = (() => {
     }
     return [root, 0];
   }
+// Heading # marks are hidden except on the line being edited, so they can
+// still be seen and changed there. They stay in the text either way.
+let caretLine = null;
 
+function markCaretLine(node) {
+  if (node === undefined) {
+    const sel = window.getSelection();
+    node = sel.rangeCount && root.contains(sel.anchorNode) ? sel.anchorNode : null;
+  }
+  if (node && node.nodeType !== Node.ELEMENT_NODE) node = node.parentElement;
+  const line = raw || !node ? null : lineOf(node);
+  if (line === caretLine) return;
+  caretLine?.classList.remove('caret-line');
+  line?.classList.add('caret-line');
+  caretLine = line;
+}
   function selection() {
     if (raw) return [rawEl.selectionStart, rawEl.selectionEnd];
     const sel = window.getSelection();
@@ -161,8 +176,9 @@ const Editor = (() => {
     }
     const [n1, o1] = fromOffset(a);
     const [n2, o2] = fromOffset(b);
+    const el = n2.nodeType === Node.ELEMENT_NODE ? n2 : n2.parentElement;   // moved up
+    markCaretLine(el);                                                      // new
     window.getSelection().setBaseAndExtent(n1, o1, n2, o2);
-    const el = n2.nodeType === Node.ELEMENT_NODE ? n2 : n2.parentElement;
     lineOf(el)?.scrollIntoView({ block: 'nearest' });
   }
 
@@ -519,6 +535,7 @@ const Editor = (() => {
     if (raw || composing) return;
     const sel = window.getSelection();
     if (sel.rangeCount && root.contains(sel.anchorNode)) lastSel = selection();
+    markCaretLine();
   });
 
   // ---------- raw view input ----------

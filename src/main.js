@@ -43,7 +43,12 @@ const weekday = (d) => d.toLocaleDateString('en-GB', { weekday: 'long' });
 // ---------- templates ----------
 
 // Placeholders are filled in once, at creation; saved files hold plain text.
-function fillTemplate(text, date) {
+// A line using {{weather}} or {{moon}} is left out when neither has a value
+// (a past day, no place set, or no connection).
+const BASIC = /\{\{\s*(date|weekday|time|year|month)\s*\}\}/g;
+const EXTRA = /\{\{\s*(weather|moon)\s*\}\}/g;
+
+function fillTemplate(text, date, extras = {}) {
   const values = {
     date: longDate(date),
     weekday: weekday(date),
@@ -51,7 +56,35 @@ function fillTemplate(text, date) {
     year: String(date.getFullYear()),
     month: date.toLocaleDateString('en-GB', { month: 'long' }),
   };
-  return text.replace(/\{\{\s*(date|weekday|time|year|month)\s*\}\}/g, (_, key) => values[key]);
+  const basics = (line) => line.replace(BASIC, (_, key) => values[key]);
+  let dropped = false;
+  const out = text
+    .split('\n')
+    .flatMap((line) => {
+      if (!line.match(EXTRA)) return [basics(line)];
+      let filled = false;
+      const done = line.replace(EXTRA, (_, key) => {
+        if (extras[key]) filled = true;
+        return extras[key] ?? '';
+      });
+      if (!filled) dropped = true;
+      return filled ? [basics(done).replace(/^[\s·|,]+|[\s·|,]+$/g, '')] : [];
+    })
+    .join('\n');
+  return dropped ? out.replace(/\n{3,}/g, '\n\n') : out;
+}
+
+// Weather and moon phase for today's new entry, fetched once per session.
+// The request itself is cached, so clicking Today twice doesn't ask twice.
+const extrasCache = new Map();
+
+async function dayExtras(date, template) {
+  if (!template.match(EXTRA) || date !== isoDate(new Date())) return {};
+  if (!extrasCache.has(date)) {
+    setStatus('Fetching weather…');
+    extrasCache.set(date, invoke('day_extras', { date }).catch(() => ({})));
+  }
+  return extrasCache.get(date);
 }
 
 async function loadTemplate(name) {
@@ -82,7 +115,7 @@ async function openTemplate(name) {
   const text = await loadTemplate(name);
   doc = { kind: 'template', name };
   showDoc(text, `Template: ${name}`);
-  setStatus('Placeholders: {{date}} {{weekday}} {{time}} {{year}} {{month}}');
+  setStatus('Placeholders: {{date}} {{weekday}} {{time}} {{year}} {{month}} {{weather}} {{moon}}');
   renderTemplates();
   renderCalendar();
 }
@@ -162,7 +195,8 @@ async function openEntry(date, { template = 'day', append = false } = {}) {
       text = `${text.trimEnd()}\n\n${session}`;
     }
   } else {
-    text = fillTemplate(await loadTemplate(template), day);
+    const source = await loadTemplate(template);
+    text = fillTemplate(source, day, await dayExtras(date, source));
   }
 
   doc = { kind: 'entry', date, onDisk: existing !== null };
@@ -741,6 +775,7 @@ let settings = {
   reminder_time: '21:00',
   reminder_message: '',
   hide_tags: false,
+  weather_location: '',
 };
 
 function applyAccent(accent) {
@@ -764,6 +799,7 @@ function showSettingsState() {
   $('reminder-time').value = settings.reminder_time;
   $('reminder-message').value = settings.reminder_message;
   $('tags-on').checked = !settings.hide_tags;
+  $('weather-location').value = settings.weather_location ?? '';
 }
 
 function reminderStatus(text, error = false) {
@@ -805,6 +841,20 @@ $('tags-on').addEventListener('change', async () => {
   settings.hide_tags = !$('tags-on').checked;
   renderTags();
   await invoke('set_hide_tags', { hide: settings.hide_tags }).catch((e) => setStatus(String(e)));
+});
+
+$('weather-location').addEventListener('change', async () => {
+  const status = $('weather-status');
+  try {
+    await invoke('set_weather_location', { location: $('weather-location').value });
+    settings.weather_location = $('weather-location').value.trim();
+    extrasCache.clear();
+    status.hidden = true;
+  } catch (e) {
+    status.textContent = String(e);
+    status.classList.add('error');
+    status.hidden = false;
+  }
 });
 
 async function openSettings() {
@@ -938,6 +988,10 @@ function start() {
   $('welcome').hidden = true;
   $('app').hidden = false;
   $('journal-path').textContent = tilde(journal);
+  // Draw this month straight away; today's entry may wait a moment for the weather.
+  const now = new Date();
+  view = { year: now.getFullYear(), month: now.getMonth() + 1 };
+  renderCalendar();
   goToday();
   loadTags();
 }

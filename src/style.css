@@ -292,6 +292,8 @@ button.link:hover { color: var(--ink); }
 #editor .h2 { font-size: 1.35em; line-height: 1.3; font-weight: bold; margin: 0.45em 0 0.15em; }
 #editor .h3 { font-size: 1.12em; line-height: 1.4; font-weight: bold; margin: 0.35em 0 0.1em; }
 #editor .h4, #editor .h5, #editor .h6 { font-weight: bold; }
+/* Heading # marks hide except on the line being edited. */
+#editor .line:not(.caret-line) > .hmark { display: none; }
 #editor .quote { border-left: 3px solid var(--rule); padding-left: 0.8em; font-style: italic; color: var(--muted); }
 /* List markers are part of the structure, so they're less faded. */
 #editor .li > .md { color: var(--accent); opacity: 0.8; }

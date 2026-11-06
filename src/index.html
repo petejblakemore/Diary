@@ -150,6 +150,13 @@
         </label>
       </section>
 
+      <section>
+  <h3>Weather</h3>
+  <input id="weather-location" type="text" maxlength="60" placeholder="e.g. Nantlle (leave blank for none)" aria-label="Weather location">
+  <p class="hint">Add {{weather}} and {{moon}} to a template such as day.md. They're filled in once, when today's entry is created. The moon phase is worked out on this Mac; the weather is fetched once from wttr.in, which sees the place name and your IP address. Leave blank to keep Diary fully offline.</p>
+  <p id="weather-status" class="hint" hidden></p>
+</section>
+
       <div class="actions">
         <button id="settings-done" class="primary">Done</button>
       </div>

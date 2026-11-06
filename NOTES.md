@@ -100,9 +100,12 @@ App settings are in `~/Library/Application Support/com.pete.diary/`.
   which runs `Diary.app/Contents/MacOS/diary --remind` at the chosen time. That
   run opens no window: it reads the settings file, checks for today's entry, and
   only notifies within three hours of the set time (so waking the Mac next
-  morning doesn't trigger it). Notifications use `mac-notification-sys`, which
-  relies on Apple's older notification API. If a future macOS stops showing
-  them, switch `reminder::notify` to UNUserNotificationCenter.
+  morning doesn't trigger it). Notifications use UNUserNotificationCenter via
+  objc2 and block2 (`reminder.rs`). The old `mac-notification-sys` reported
+  success but showed nothing on current macOS, so it was replaced on 6 Nov 2026.
+  A small delegate lets notifications show while Diary is in front (Send Test).
+  Notifications only work from the installed Diary.app, never under
+  `cargo tauri dev`, which has no app bundle.
 - **Tags** are plain text (`#word`, a letter first). Nothing is indexed on disk:
   `all_tags` scans the diary at launch, and the page updates the list from each
   saved entry. Fine for decades of entries; revisit only if launch gets slow.

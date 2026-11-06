@@ -11,6 +11,7 @@ mod import;
 mod reminder;
 mod spelling;
 mod tags;
+mod weather;
 
 use chrono::{Datelike, Local, NaiveDate};
 use git2::{IndexAddOption, Repository, Signature};
@@ -52,6 +53,8 @@ struct Config {
     reminder_message: String,
     /// Hide the tag list in the sidebar.
     hide_tags: bool,
+        /// Place name for the daily weather line, or "" for none.
+    weather_location: String,
 }
 
 const ACCENTS: [&str; 6] = ["brown", "blue", "green", "plum", "slate", "red"];
@@ -244,6 +247,7 @@ struct Settings {
     reminder_time: String,
     reminder_message: String,
     hide_tags: bool,
+    weather_location: String,
 }
 
 #[tauri::command]
@@ -264,6 +268,7 @@ fn get_settings(app: AppHandle) -> Settings {
             config.reminder_message
         },
         hide_tags: config.hide_tags,
+        weather_location: config.weather_location,
     }
 }
 
@@ -296,6 +301,27 @@ fn set_hide_tags(app: AppHandle, hide: bool) -> Result<(), String> {
     save_config(&app, &config)
 }
 
+#[tauri::command]
+fn set_weather_location(app: AppHandle, location: String) -> Result<(), String> {
+    let mut config = load_config(&app);
+    config.weather_location = weather::clean_location(&location)?.unwrap_or_default();
+    save_config(&app, &config)
+}
+
+/// Moon phase and, if a place is set, the weather. Only for today, so past
+/// days never get today's weather.
+#[tauri::command]
+async fn day_extras(app: AppHandle, date: String) -> Result<weather::Extras, String> {
+    let day = parse_date(&date)?;
+    if day != Local::now().date_naive() {
+        return Ok(weather::Extras::default());
+    }
+    let place = load_config(&app).weather_location;
+    let place = (!place.is_empty()).then_some(place);
+    tauri::async_runtime::spawn_blocking(move || weather::extras(day, place.as_deref()))
+        .await
+        .map_err(err)
+}
 /// Light, dark or match the Mac. Setting the window's appearance also
 /// switches the page, its title bar and menus.
 fn apply_appearance(app: &AppHandle, appearance: &str) {
@@ -768,6 +794,8 @@ fn main() {
             set_reminder,
             test_reminder,
             set_hide_tags,
+            set_weather_location,
+            day_extras,
             tags::all_tags,
             month_entries,
             read_entry,
